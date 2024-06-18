@@ -61,7 +61,7 @@ def mean_stddev(l):
 
 def thread_run_sabre(results, command):
     completed = subprocess.run(command, stdout = subprocess.PIPE)
-    for line in completed.stdout.decode('ascii').split('\n'):
+    for line in completed.stdout.decode('utf-8').split('\n'):
         l = line.split(':')
         if len(l) != 2:
             continue
@@ -69,7 +69,7 @@ def thread_run_sabre(results, command):
             results[l[0]].append(float(l[1]))
 
 def thread_run_gnuplot(plotting):
-    subprocess.run('gnuplot', input = plotting.encode('ascii'))
+    subprocess.run('gnuplot', input = plotting.encode('utf-8'))
 
 def do_figure(prefix, subfigs, algorithms, metrics, term = None):
     print(prefix + ' ', end = '')
@@ -210,7 +210,7 @@ def do_figure(prefix, subfigs, algorithms, metrics, term = None):
 
             trm = term[mi] if isinstance(term, list) else term
             if trm == None:
-                trm = 'pdf size 2.3, 1.75 font ",16"'
+                trm = 'pdf size 5, 5 font ",10"'
 
             plotting = '''set term ''' + trm + '''
 set bmargin 3.5
@@ -257,13 +257,13 @@ def figure6a():
                                 '-m', 'bbb.json', '-n', 'tmp/network.json',
                                 '-a', 'bola', '-ab'],
                                stdout = subprocess.PIPE)
-    basic = completed.stdout.decode('ascii')
+    basic = completed.stdout.decode('utf-8')
 
     completed = subprocess.run(['python3', './sabre-mmsys18.py', '-v',
                                 '-m', 'bbb.json', '-n', 'tmp/network.json',
-                                '-a', 'bolae'],
+                                '-a', 'ashbola'],
                                stdout = subprocess.PIPE)
-    bolapl = completed.stdout.decode('ascii')
+    bolapl = completed.stdout.decode('utf-8')
 
     fig1 = []
     for out in [basic, bolapl]:
@@ -289,7 +289,7 @@ def figure6a():
             for l in fig1[i]:
                 f.write('%f %f\n' % (l[0], l[1]))
 
-    plotting = '''set term pdf size 1.9, 1.75 font ",16"
+    plotting = '''set term pdf size 5, 5 font ",10"
 set bmargin 3.5
 
 set style data lines
@@ -298,7 +298,7 @@ set yrange[0:6500]
 set xlabel 'play time (s)'
 set ylabel 'bitrate (kbps)'
 
-set xtics 10
+set xtics 5
 
 #set key bottom right
 set key out top center
@@ -310,7 +310,7 @@ plot "tmp/fig1a.dat" title "BOLA" lc 7 dt 4 lw 2, "tmp/fig1b.dat" notitle lc 6 l
 
 set output
 '''
-    subprocess.run('gnuplot', input = plotting.encode('ascii'))
+    subprocess.run('gnuplot', input = plotting.encode('utf-8'))
 
 def figure6b():
     figure12_write_network()
@@ -320,14 +320,14 @@ def figure6b():
                                 '-s', '120', '180',
                                 '-a', 'bola', '-ab'],
                                stdout = subprocess.PIPE)
-    basic = completed.stdout.decode('ascii')
+    basic = completed.stdout.decode('utf-8')
 
     completed = subprocess.run(['python3', './sabre-mmsys18.py', '-v',
                                 '-m', 'bbb.json', '-n', 'tmp/network.json',
                                 '-s', '120', '180',
-                                '-a', 'bolae'],
+                                '-a', 'ashbola'],
                                stdout = subprocess.PIPE)
-    bolapl = completed.stdout.decode('ascii')
+    bolapl = completed.stdout.decode('utf-8')
 
     fig2 = []
     for out in [basic, bolapl]:
@@ -359,7 +359,7 @@ def figure6b():
                 else:
                     f.write('%f %f\n' % (l[0], l[1]))
 
-    plotting = '''set term pdf size 1.47, 1.75 font ",16"
+    plotting = '''set term pdf size 5, 5 font ",12"
 set bmargin 3.5
 
 set style data lines
@@ -370,7 +370,7 @@ set xlabel 'play time (s)'
 
 #set ylabel 'bitrate (kbps)'
 set ytics format ""
-set xtics 10
+set xtics 5
 
 #set key bottom right
 set key out top center
@@ -382,7 +382,7 @@ plot "tmp/fig2a.dat" notitle lc 7 dt 4 lw 2, "tmp/fig2b.dat" title "BOLA-PL" lc 
 
 set output
 '''
-    subprocess.run('gnuplot', input = plotting.encode('ascii'))
+    subprocess.run('gnuplot', input = plotting.encode('utf-8'))
 
 def figure_1_4():
 
@@ -448,7 +448,7 @@ def figure_1_4():
 40 0
 ''')
 
-    plotting1 = '''set term pdf size 3.35, 1.5 font ",16"
+    plotting1 = '''set term pdf size 5, 5 font ",10"
 set bmargin 3.5
 
 set style data lines
@@ -480,7 +480,7 @@ plot "tmp/egbuf.dat" lc 7 lw 2 notitle
 set output
 '''
 
-    plotting2 = '''set term pdf size 3.35, 1.5 font ",16"
+    plotting2 = '''set term pdf size 5, 5 font ",10"
 set bmargin 3.5
 
 set style data lines
@@ -514,8 +514,8 @@ plot "tmp/lowbufb.dat" lc 6 lw 2 notitle
 
 set output
 '''
-    subprocess.run('gnuplot', input = plotting1.encode('ascii'))
-    subprocess.run('gnuplot', input = plotting2.encode('ascii'))
+    subprocess.run('gnuplot', input = plotting1.encode('utf-8'))
+    subprocess.run('gnuplot', input = plotting2.encode('utf-8'))
 
 def figure_7_10():
     subfigs = [
@@ -540,18 +540,21 @@ def figure_7_10():
     prefix = 'fig7a'
     algorithms = [
         ('BOLA'   , ['-ao', '-a', 'bola', '-ab']    , 'lc 7'),
-        ('BOLA-PL', ['-ao', '-a', 'bolae', '-noibr'], 'notitle lc 6'),
+        ('AshBola', ['-ao', '-a', 'ashbola', '-noibr'], 'notitle lc 6'),
+        # ('BOLA-PL', ['-ao', '-a', 'bolae', '-noibr'], 'notitle lc 6')
     ]
 
-    term = 'pdf size 1.8, 1.75 font ",16"'
+    term = 'pdf size 5, 5 font ",10"'
     do_figure(prefix, subfigs, algorithms, metrics, term = term)
 
     prefix = 'fig7b'
     algorithms = [
         ('BOLA'   , ['-ao', '-a', 'bola', '-ab'    , '-s', '120', '180'], 'notitle lc 7'),
-        ('BOLA-PL', ['-ao', '-a', 'bolae', '-noibr', '-s', '120', '180'], 'lc 6'),
+        ('AshBola', ['-ao', '-a', 'ashbola', '-noibr', '-s', '120', '180'], 'lc 6'),
+        # ('BOLA-PL', ['-ao', '-a', 'bolae', '-noibr', '-s', '120', '180'], 'lc 6'),
+
     ]
-    term = 'pdf size 1.5, 1.75 font ",16"\nset ytics format ""'
+    term = 'pdf size 5, 5 font ",10"\nset ytics format ""'
     do_figure(prefix, subfigs, algorithms, metrics, term = term)
 
 
@@ -560,8 +563,9 @@ def figure_7_10():
         ('BOLA'         , ['-ao', '-a', 'bola', '-ab'], 'lc 4'),
         ('TPUT'   , ['-ao', '-a', 'throughput'], 'lc 2'),
         ('DYNAMIC'      , ['-ao', '-a', 'dynamic', '-ab'], 'notitle lc 1'),
+        ('ASHBOLA'   , ['-ao', '-a', 'ashbola'], 'lc 3'),
     ]
-    term = 'pdf size 1.8, 1.75 font ",16"'
+    term = 'pdf size 5, 5 font ",10"'
     do_figure(prefix, subfigs, algorithms, metrics, term = term)
 
     prefix = 'fig10b'
@@ -569,8 +573,9 @@ def figure_7_10():
         ('BOLA'         , ['-ao', '-a', 'bola', '-ab', '-s', '120', '180'], 'notitle lc 4'),
         ('TPUT'   , ['-ao', '-a', 'throughput', '-s', '120', '180'], 'notitle lc 2'),
         ('DYNAMIC'      , ['-ao', '-a', 'dynamic', '-ab', '-s', '120', '180'], 'lc 1'),
+        ('ASHBOLA'         , ['-ao', '-a', 'ashbola', '-ab', '-s', '120', '180'], 'notitle lc 3'),
     ]
-    term = 'pdf size 1.5, 1.75 font ",16"\nset ytics format ""'
+    term = 'pdf size 5, 5 font ",10"\nset ytics format ""'
     do_figure(prefix, subfigs, algorithms, metrics, term = term)
 
 def figure8():
@@ -580,6 +585,8 @@ def figure8():
         ('BOLA',    ['-a', 'bola',  '-ao', '-ab'],    ' lc 4'),
         ('BOLA-PL', ['-a', 'bolae', '-ao', '-noibr'], ' lc 7'),
         ('BOLA-E' , ['-a', 'bolae', '-ao'          ], ' lc 6'),
+        ('ASHBOLA' , ['-a', 'ashbola', '-ao'          ], ' lc 3'),
+
     ]
 
     metrics = [
@@ -629,6 +636,8 @@ def figure11():
         ('BOLA'         , ['-ao', '-a', 'bola'      ], 'lc 4'),
         ('THROUGHPUT'   , ['-ao', '-a', 'throughput'], 'lc 2'),
         ('DYNAMIC'      , ['-ao', '-a', 'dynamic'   ], 'lc 1'),
+        ('ASHBOLA'      , ['-ao', '-a', 'ashbola'   ], 'lc 3'),
+
     ]
 
     metrics = [
@@ -652,6 +661,7 @@ def figure_12_13():
         ('BOLA-E-FS' , ['-ao', '-r', 'left', '-a', 'bolae'  , '-rmp', '9', '-ml', '180'], 'lc 1'),
         ('DYNAMIC'   , ['-ao', '-r', 'none', '-a', 'dynamic', '-rmp', '9', '-ml', '180'], 'notitle lc 3'),
         ('DYNAMIC-FS', ['-ao', '-r', 'left', '-a', 'dynamic', '-rmp', '9', '-ml', '180'], 'notitle lc 4'),
+        ('ASHBOLA', ['-ao', '-r', 'left', '-a', 'ashbola', '-rmp', '9', '-ml', '180'], 'notitle lc 2'),
     ]
 
     metrics = [
@@ -662,7 +672,7 @@ def figure_12_13():
         ('reaction time', 'rampup time', {'xoffset': -60, 'key': 'out top center vertical', 'xtics': 40}),
     ]
 
-    term = 'pdf size 1.8, 1.75 font ",16"\n'
+    term = 'pdf size 5, 5 font ",10"\n'
     do_figure(prefix, subfigs, algorithms, metrics, term = [None, None, None, term])
 
     prefix = '12_13'
@@ -676,6 +686,7 @@ def figure_12_13():
         ('BOLA-E-FS' , ['-ao', '-r', 'left', '-a', 'bolae'  , '-rmp', '4', '-ml', '180'], 'notitle lc 1'),
         ('DYNAMIC'   , ['-ao', '-r', 'none', '-a', 'dynamic', '-rmp', '4', '-ml', '180'], 'lc 3'),
         ('DYNAMIC-FS', ['-ao', '-r', 'left', '-a', 'dynamic', '-rmp', '4', '-ml', '180'], 'lc 4'),
+        ('ASHBOLA', ['-ao', '-r', 'left', '-a', 'ashbola', '-rmp', '4', '-ml', '180'], 'lc 2'),
     ]
 
     metrics = [
@@ -686,7 +697,7 @@ def figure_12_13():
         ('reaction time', 'rampup time', {'xoffset': -60, 'key': 'out top center vertical', 'xtics': 40}),
     ]
 
-    term = 'pdf size 1.5, 1.75 font ",16"\nset ytics format ""'
+    term = 'pdf size 5, 5 font ",10"\nset ytics format ""'
     do_figure(prefix, subfigs, algorithms, metrics, term = [None, None, None, term])
     
 if __name__ == '__main__':
@@ -704,4 +715,6 @@ if __name__ == '__main__':
     figure_7_10()
     figure8()
     figure11()
-    figure_12_13()
+    figure_12_13() 
+    # relevant is 11 to 13
+

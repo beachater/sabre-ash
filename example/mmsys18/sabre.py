@@ -752,7 +752,7 @@ class AshBola(Abr):
             'mse': tf.keras.losses.MeanSquaredError()
         }
 
-        self.model = tf.keras.models.load_model('E:/USTP FILES/2nd Year - 2nd Sem/ALGO 2/Algo 2 thesis/Sabre Simulation/sabre/src/ashBOLA.h5', custom_objects=custom_objects)
+        self.model = tf.keras.models.load_model('/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/src/ashBOLA.h5', custom_objects=custom_objects)
 
         if verbose:
             for q in range(len(manifest.bitrates)):

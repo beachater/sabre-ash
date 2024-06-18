@@ -30,7 +30,10 @@ import sys
 import string
 from collections import namedtuple
 from enum import Enum
-
+import tensorflow as tf
+import numpy as np
+import math
+import json
 # Units used throughout:
 #     size     : bits
 #     time     : ms
@@ -700,6 +703,157 @@ class Bola(Abr):
         return abandon_to
 
 abr_list['bola'] = Bola
+
+
+import tensorflow as tf  # Assuming TensorFlow is used for the GRU model
+
+
+class AshBola(Abr):
+
+    def __init__(self, config):
+        global verbose
+        global manifest
+
+        utility_offset = -math.log(manifest.bitrates[0])
+        self.utilities = [math.log(b) + utility_offset for b in manifest.bitrates]
+
+        self.gp = config['gp']
+        self.buffer_size = config['buffer_size']
+        self.abr_osc = config['abr_osc']
+        self.abr_basic = config['abr_basic']
+        self.Vp = (self.buffer_size - manifest.segment_time) / (self.utilities[-1] + self.gp)
+
+        self.last_seek_index = 0
+        self.last_quality = 0
+
+# Handle custom objects
+        custom_objects = {
+            'mse': tf.keras.losses.MeanSquaredError()
+        }
+
+        self.model = tf.keras.models.load_model('/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/src/ashBOLA3g4g.h5', custom_objects=custom_objects)
+
+        if verbose:
+            for q in range(len(manifest.bitrates)):
+                b = manifest.bitrates[q]
+                u = self.utilities[q]
+                l = self.Vp * (self.gp + u)
+                if q == 0:
+                    print('%d %d' % (q, l))
+                else:
+                    qq = q - 1
+                    bb = manifest.bitrates[qq]
+                    uu = self.utilities[qq]
+                    ll = self.Vp * (self.gp + (b * uu - bb * u) / (b - bb))
+                    print('%d %d    <- %d %d' % (q, l, qq, ll))
+
+    def prepare_prediction_data(self, network_trace, segment_index, window_size):
+        data = []
+        for i in range(segment_index - window_size, segment_index):
+            if i >= 0 and i < len(network_trace):
+                period = network_trace[i]
+                period_time = period.time / 1000
+                period_bandwidth = period.bandwidth / 1000
+                data.append([period_time * period_bandwidth, period_time, period_bandwidth])
+                print("windowsize", window_size)
+
+        # Ensure data has exactly `window_size` elements by padding with zeros if necessary
+        if len(data) < window_size:
+            padding = [[0, 0, 0]] * (window_size - len(data))
+            data = padding + data
+
+        assert len(data) == window_size, f"Data length {len(data)} does not match window size {window_size}"
+        return np.array(data).reshape((1, window_size, 3))
+
+    def predict_bandwidth(self, network_trace, segment_index):
+        window_size = 20
+        data = self.prepare_prediction_data(network_trace, segment_index, window_size)
+        predicted_bandwidth = self.model.predict(data)[0][0]
+        return predicted_bandwidth * 1000  # Convert back to kbps
+
+    def quality_from_buffer(self, predicted_throughput):
+        level = get_buffer_level()
+        quality = 0
+        score = None
+        for q in range(len(manifest.bitrates)):
+            s = ((self.Vp * (self.utilities[q] + self.gp) - level) / manifest.bitrates[q])
+            if score == None or s > score:
+                quality = q
+                score = s
+        return quality
+
+    def get_quality_delay(self, segment_index):
+        global manifest
+        global throughput
+
+        predicted_throughput = self.predict_bandwidth(network_trace, segment_index)
+
+        if not self.abr_basic:
+            t = min(segment_index - self.last_seek_index, len(manifest.segments) - segment_index)
+            t = max(t / 2, 3)
+            t = t * manifest.segment_time
+            buffer_size = min(self.buffer_size, t)
+            self.Vp = (buffer_size - manifest.segment_time) / (self.utilities[-1] + self.gp)
+
+        quality = self.quality_from_buffer(predicted_throughput)
+        delay = 0
+
+        if quality > self.last_quality:
+            quality_t = self.quality_from_throughput(predicted_throughput)
+            if quality <= quality_t:
+                delay = 0
+            elif self.last_quality > quality_t:
+                quality = self.last_quality
+                delay = 0
+            else:
+                if not self.abr_osc:
+                    quality = quality_t + 1
+                    delay = 0
+                else:
+                    quality = quality_t
+                    b = manifest.bitrates[quality]
+                    u = self.utilities[quality]
+                    l = self.Vp * (self.gp + u)
+                    delay = max(0, get_buffer_level() - l)
+                    if quality == len(manifest.bitrates) - 1:
+                        delay = 0
+
+        self.last_quality = quality
+        return (quality, delay)
+
+    def report_seek(self, where):
+        global manifest
+        self.last_seek_index = math.floor(where / manifest.segment_time)
+
+    def check_abandon(self, progress, buffer_level):
+        global manifest
+
+        if self.abr_basic:
+            return None
+
+        remain = progress.size - progress.downloaded
+        if progress.downloaded <= 0 or remain <= 0:
+            return None
+
+        abandon_to = None
+        score = (self.Vp * (self.gp + self.utilities[progress.quality]) - buffer_level) / remain
+        if score < 0:
+            return None
+
+        for q in range(progress.quality):
+            other_size = progress.size * manifest.bitrates[q] / manifest.bitrates[progress.quality]
+            other_score = (self.Vp * (self.gp + self.utilities[q]) - buffer_level) / other_size
+            if other_size < remain and other_score > score:
+                score = other_score
+                abandon_to = q
+
+        if abandon_to != None:
+            self.last_quality = abandon_to
+
+        return abandon_to
+
+abr_list['ashbola'] = AshBola
+
 
 class BolaEnh(Abr):
 
