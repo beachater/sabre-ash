@@ -1084,15 +1084,9 @@ class CombinedAbr(Abr):
 
 abr_list['combined'] = CombinedAbr
 
+import collections
 
-
-
-
-
-
-
-
-class BolaEnh(Abr):
+class AshBolaEnh(Abr):
 
     minimum_buffer = 10000
     minimum_buffer_per_level = 2000
@@ -1110,6 +1104,9 @@ class BolaEnh(Abr):
         config_buffer_size = config['buffer_size']
         self.abr_osc = config['abr_osc']
         self.no_ibr = config['no_ibr']
+        self.bandwidth_history = []  # Store bandwidth predictions
+        self.max_history_length = 10  # Max length of the bandwidth history
+        self.initial_bandwidth_estimate = 1000  # Conservative initial estimate
 
         utility_offset = 1 - math.log(manifest.bitrates[0]) # so utilities[0] = 1
         self.utilities = [math.log(b) + utility_offset for b in manifest.bitrates]
@@ -1119,19 +1116,21 @@ class BolaEnh(Abr):
             buffer = config['buffer_size']
             self.Vp = (buffer - manifest.segment_time) / (self.utilities[-1] + self.gp)
         else:
-            buffer = BolaEnh.minimum_buffer
-            buffer += BolaEnh.minimum_buffer_per_level * len(manifest.bitrates)
+            buffer = AshBolaEnh.minimum_buffer
+            buffer += AshBolaEnh.minimum_buffer_per_level * len(manifest.bitrates)
             buffer = max(buffer, config_buffer_size)
             print(buffer)
-            self.gp = (self.utilities[-1] - 1) / (buffer / BolaEnh.minimum_buffer - 1)
-            self.Vp = BolaEnh.minimum_buffer / self.gp
-            #equivalently:
-            #self.Vp = (buffer - BolaEnh.minimum_buffer) / (math.log(manifest.bitrates[-1] / manifest.bitrates[0]))
-            #self.gp = BolaEnh.minimum_buffer / self.Vp
+            self.gp = (self.utilities[-1] - 1) / (buffer / AshBolaEnh.minimum_buffer - 1)
+            self.Vp = AshBolaEnh.minimum_buffer / self.gp
 
-        self.state = BolaEnh.State.STARTUP
+        self.state = AshBolaEnh.State.STARTUP
         self.placeholder = 0
         self.last_quality = 0
+        
+        custom_objects = {
+            'mse': tf.keras.losses.MeanSquaredError()
+        }
+        self.gru_model = tf.keras.models.load_model('/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/src/ashBOLA3g4g.h5', custom_objects=custom_objects)
 
         if verbose:
             for q in range(len(manifest.bitrates)):
@@ -1142,10 +1141,30 @@ class BolaEnh(Abr):
                     print('%d %d' % (q, l))
                 else:
                     qq = q - 1
-                    bb = manifest.bitrates[qq]
+                    bb = manifest.bitrates[qq]  
                     uu = self.utilities[qq]
                     ll = self.Vp * (self.gp + (b * uu - bb * u) / (b - bb))
                     print('%d %d    <- %d %d' % (q, l, qq, ll))
+                    
+    def smooth_bandwidth(self):
+        if len(self.bandwidth_history) == 0:
+            return self.initial_bandwidth_estimate
+        alpha = 0.1  # Adjust this smoothing factor as per requirement
+        smoothed_bandwidth = self.bandwidth_history[-1]
+        for i in range(len(self.bandwidth_history) - 2, -1, -1):
+            smoothed_bandwidth = alpha * self.bandwidth_history[i] + (1 - alpha) * smoothed_bandwidth
+        return smoothed_bandwidth
+    
+    def detect_oscillation(self):
+        if len(self.bandwidth_history) < self.max_history_length:
+            return False
+        increase = decrease = 0
+        for i in range(1, len(self.bandwidth_history)):
+            if self.bandwidth_history[i] > self.bandwidth_history[i-1]:
+                increase += 1
+            elif self.bandwidth_history[i] < self.bandwidth_history[i-1]:
+                decrease += 1
+        return increase > 0 and decrease > 0
 
     def quality_from_buffer(self, level):
         if level == None:
@@ -1170,9 +1189,6 @@ class BolaEnh(Abr):
 
         level = 0
         for q in range(quality):
-            # for each bitrates[q] less than bitrates[quality],
-            # BOLA should prefer bitrates[quality]
-            # (unless bitrates[q] has higher utility)
             if self.utilities[q] < self.utilities[quality]:
                 b = manifest.bitrates[q]
                 u = self.utilities[q]
@@ -1182,7 +1198,50 @@ class BolaEnh(Abr):
 
     def max_buffer_for_quality(self, quality):
         return self.Vp * (self.utilities[quality] + self.gp)
+    
+    def prepare_prediction_data(self, network_trace, segment_index, window_size):
+        data = []
+        for i in range(segment_index - window_size, segment_index):
+            if i >= 0 and i < len(network_trace):
+                period = network_trace[i]
+                period_time = period.time / 1000
+                period_bandwidth = period.bandwidth / 1000
+                data.append([period_time * period_bandwidth, period_time, period_bandwidth])
 
+        # If data length is less than window_size, pad with estimated data
+        if len(data) < window_size:
+            padding_length = window_size - len(data)
+            if len(data) > 0:
+                last_period = data[-1]
+            else:
+                # If no data is available, estimate based on the first period
+                last_period = [0, 0, 0]  # Replace with appropriate estimated values
+
+            padding = [last_period] * padding_length
+            data = padding + data
+            print(data)
+
+        assert len(data) == window_size, f"Data length {len(data)} does not match window size {window_size}"
+        return np.array(data).reshape((1, window_size, 3))
+
+    def predict_bandwidth(self, network_trace, segment_index):
+        window_size = 5
+        data = self.prepare_prediction_data(network_trace, segment_index, window_size)
+        predicted_bandwidth = self.gru_model.predict(data)[0][0] * 1000
+        
+        self.bandwidth_history.append(predicted_bandwidth)
+        if len(self.bandwidth_history) > self.max_history_length:
+            self.bandwidth_history.pop(0)
+        
+        if self.detect_oscillation():
+            return self.smooth_bandwidth()
+        
+        # Detect and handle sudden bandwidth drops
+        if len(self.bandwidth_history) > 1 and (self.bandwidth_history[-2] - predicted_bandwidth) / self.bandwidth_history[-2] > 0.5:
+            return self.smooth_bandwidth()
+        
+        return predicted_bandwidth
+    
     def get_quality_delay(self, segment_index):
         global buffer_contents
         global buffer_fcc
@@ -1190,18 +1249,19 @@ class BolaEnh(Abr):
 
         buffer_level = get_buffer_level()
 
-        if self.state == BolaEnh.State.STARTUP:
+        if self.state == AshBolaEnh.State.STARTUP:
             if throughput == None:
                 return (self.last_quality, 0)
-            self.state = BolaEnh.State.STEADY
-            self.ibr_safety = BolaEnh.low_buffer_safety_factor_init
+            self.state = AshBolaEnh.State.STEADY
+            self.ibr_safety = AshBolaEnh.low_buffer_safety_factor_init
             quality = self.quality_from_throughput(throughput)
             self.placeholder = self.min_buffer_for_quality(quality) - buffer_level
             self.placeholder = max(0, self.placeholder)
             return (quality, 0)
 
         quality = self.quality_from_buffer_placeholder()
-        quality_t = self.quality_from_throughput(throughput)
+        predicted_throughput = self.predict_bandwidth(network_trace, segment_index)
+        quality_t = self.quality_from_throughput(predicted_throughput)
         if quality > self.last_quality and quality > quality_t:
             quality = max(self.last_quality, quality_t)
             if not self.abr_osc:
@@ -1209,7 +1269,6 @@ class BolaEnh(Abr):
 
         max_level = self.max_buffer_for_quality(quality)
 
-        ################
         if quality > 0:
             q = quality
             b = manifest.bitrates[q]
@@ -1217,8 +1276,6 @@ class BolaEnh(Abr):
             qq = q - 1
             bb = manifest.bitrates[qq]
             uu = self.utilities[qq]
-            #max_level = self.Vp * (self.gp + (b * uu - bb * u) / (b - bb))
-        ################
 
         delay = buffer_level + self.placeholder - max_level
         if delay > 0:
@@ -1234,14 +1291,12 @@ class BolaEnh(Abr):
         if quality == len(manifest.bitrates) - 1:
             delay = 0
 
-        # insufficient buffer rule
         if not self.no_ibr:
             safe_size = self.ibr_safety * (buffer_level - latency) * throughput
-            self.ibr_safety *= BolaEnh.low_buffer_safety_factor_init
-            self.ibr_safety = max(self.ibr_safety, BolaEnh.low_buffer_safety_factor)
+            self.ibr_safety *= AshBolaEnh.low_buffer_safety_factor_init
+            self.ibr_safety = max(self.ibr_safety, AshBolaEnh.low_buffer_safety_factor)
             for q in range(quality):
                 if manifest.bitrates[q + 1] * manifest.segment_time > safe_size:
-                    #print('InsufficientBufferRule %d -> %d' % (quality, q))
                     quality = q
                     delay = 0
                     min_level = self.min_buffer_for_quality(quality)
@@ -1249,7 +1304,6 @@ class BolaEnh(Abr):
                     self.placeholder = min(max_placeholder, self.placeholder)
                     break
 
-        #print('ph=%d' % self.placeholder)
         return (quality, delay)
 
     def report_delay(self, delay):
@@ -1285,13 +1339,13 @@ class BolaEnh(Abr):
             if metrics.abandon_to_quality > 0:
                 want_level = self.min_buffer_for_quality(metrics.abandon_to_quality)
             else:
-                want_level = BolaEnh.minimum_buffer
+                want_level = AshBolaEnh.minimum_buffer
             max_placeholder = max(0, want_level - level)
             self.placeholder = min(self.placeholder, max_placeholder)
 
     def report_seek(self, where):
         # TODO: seek properly
-        self.state = BolaEnh.State.STARTUP
+        self.state = AshBolaEnh.State.STARTUP
 
     def check_abandon(self, progress, buffer_level):
         global manifest
@@ -1324,245 +1378,7 @@ class BolaEnh(Abr):
 
         return abandon_to
 
-abr_list['bolae'] = BolaEnh
-
-# import numpy as np
-# import tensorflow as tf
-
-# import numpy as np
-# import tensorflow as tf
-# import math
-# from enum import Enum
-
-# class BolaEnh(Abr):
-#     minimum_buffer = 10000
-#     minimum_buffer_per_level = 2000
-#     low_buffer_safety_factor = 0.5
-#     low_buffer_safety_factor_init = 0.9
-
-#     class State(Enum):
-#         STARTUP = 1
-#         STEADY = 2
-
-#     def __init__(self, config):
-#         global verbose
-#         global manifest
-
-#         config_buffer_size = config['buffer_size']
-#         self.abr_osc = config['abr_osc']
-#         self.no_ibr = config['no_ibr']
-
-#         utility_offset = 1 - math.log(manifest.bitrates[0])  # so utilities[0] = 1
-#         self.utilities = [math.log(b) + utility_offset for b in manifest.bitrates]
-
-#         if self.no_ibr:
-#             self.gp = config['gp'] - 1  # to match BOLA Basic
-#             buffer = config['buffer_size']
-#             self.Vp = (buffer - manifest.segment_time) / (self.utilities[-1] + self.gp)
-#         else:
-#             buffer = BolaEnh.minimum_buffer
-#             buffer += BolaEnh.minimum_buffer_per_level * len(manifest.bitrates)
-#             buffer = max(buffer, config_buffer_size)
-#             print(buffer)
-#             self.gp = (self.utilities[-1] - 1) / (buffer / BolaEnh.minimum_buffer - 1)
-#             self.Vp = BolaEnh.minimum_buffer / self.gp
-
-#         self.state = BolaEnh.State.STARTUP
-#         self.placeholder = 0
-#         self.last_quality = 0
-
-#         # Initialize GRU model
-#         custom_objects = {
-#             'mse': tf.keras.losses.MeanSquaredError()
-#         }
-#         self.gru_model = tf.keras.models.load_model('/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/src/ashBOLA3g4g.h5', custom_objects=custom_objects)
-
-#         if verbose:
-#             for q in range(len(manifest.bitrates)):
-#                 b = manifest.bitrates[q]
-#                 u = self.utilities[q]
-#                 l = self.Vp * (self.gp + u)
-#                 if q == 0:
-#                     print('%d %d' % (q, l))
-#                 else:
-#                     qq = q - 1
-#                     bb = manifest.bitrates[qq]
-#                     uu = self.utilities[qq]
-#                     ll = self.Vp * (self.gp + (b * uu - bb * u) / (b - bb))
-#                     print('%d %d    <- %d %d' % (q, l, qq, ll))
-
-#     def min_buffer_for_quality(self, quality):
-#         """Calculate the minimum buffer required for the given quality."""
-#         if quality == 0:
-#             return BolaEnh.minimum_buffer
-#         return BolaEnh.minimum_buffer + quality * BolaEnh.minimum_buffer_per_level
-
-#     def max_buffer_for_quality(self, quality):
-#         """Calculate the maximum buffer allowed for the given quality."""
-#         return self.min_buffer_for_quality(quality) + manifest.segment_time
-
-#     def prepare_prediction_data(self, network_trace, segment_index, window_size):
-#         data = []
-#         for i in range(segment_index - window_size, segment_index):
-#             if i >= 0 and i < len(network_trace):
-#                 period = network_trace[i]
-#                 period_time = period.time / 1000
-#                 period_bandwidth = period.bandwidth / 1000
-#                 data.append([period_time * period_bandwidth, period_time, period_bandwidth])
-
-#         if len(data) < window_size:
-#             padding = [[0, 0, 0]] * (window_size - len(data))
-#             data = padding + data
-
-#         assert len(data) == window_size, f"Data length {len(data)} does not match window size {window_size}"
-#         return np.array(data).reshape((1, window_size, 3))
-
-#     def predict_bandwidth(self, network_trace, segment_index):
-#         window_size = 50
-#         data = self.prepare_prediction_data(network_trace, segment_index, window_size)
-#         predicted_bandwidth = self.gru_model.predict(data)[0][0]
-#         return predicted_bandwidth * 1000
-
-#     def quality_from_buffer_placeholder(self):
-#         """Determine the quality level based on the current buffer placeholder."""
-#         buffer_level = get_buffer_level() + self.placeholder
-#         for quality in range(len(manifest.bitrates) - 1, -1, -1):
-#             if buffer_level >= self.min_buffer_for_quality(quality):
-#                 return quality
-#         return 0
-
-#     def quality_from_throughput(self, throughput):
-#         """Determine the quality level based on the current throughput."""
-#         for quality in range(len(manifest.bitrates) - 1, -1, -1):
-#             if throughput >= manifest.bitrates[quality]:
-#                 return quality
-#         return 0
-
-#     def get_quality_delay(self, segment_index):
-#         global buffer_contents
-#         global buffer_fcc
-#         global throughput
-#         global network_trace  # Assuming network_trace is a global variable
-
-#         buffer_level = get_buffer_level()
-
-#         if self.state == BolaEnh.State.STARTUP:
-#             if throughput is None:
-#                 return (self.last_quality, 0)
-#             self.state = BolaEnh.State.STEADY
-#             self.ibr_safety = BolaEnh.low_buffer_safety_factor_init
-#             quality = self.quality_from_throughput(throughput)
-#             self.placeholder = self.min_buffer_for_quality(quality) - buffer_level
-#             self.placeholder = max(0, self.placeholder)
-#             return (quality, 0)
-
-#         quality = self.quality_from_buffer_placeholder()
-#         predicted_throughput = self.predict_bandwidth(network_trace, segment_index)
-#         quality_t = self.quality_from_throughput(predicted_throughput)
-
-#         if quality > self.last_quality and quality > quality_t:
-#             quality = max(self.last_quality, quality_t)
-#             if not self.abr_osc:
-#                 quality += 1
-
-#         max_level = self.max_buffer_for_quality(quality)
-
-#         if quality > 0:
-#             q = quality
-#             b = manifest.bitrates[q]
-#             u = self.utilities[q]
-#             qq = q - 1
-#             bb = manifest.bitrates[qq]
-#             uu = self.utilities[qq]
-
-#         delay = buffer_level + self.placeholder - max_level
-#         if delay > 0:
-#             if delay <= self.placeholder:
-#                 self.placeholder -= delay
-#                 delay = 0
-#             else:
-#                 delay -= self.placeholder
-#                 self.placeholder = 0
-#         else:
-#             delay = 0
-
-#         if quality == len(manifest.bitrates) - 1:
-#             delay = 0
-
-#         if not self.no_ibr:
-#             safe_size = self.ibr_safety * (buffer_level - latency) * throughput
-#             self.ibr_safety *= BolaEnh.low_buffer_safety_factor_init
-#             self.ibr_safety = max(self.ibr_safety, BolaEnh.low_buffer_safety_factor)
-#             for q in range(quality):
-#                 if manifest.bitrates[q + 1] * manifest.segment_time > safe_size:
-#                     quality = q
-#                     delay = 0
-#                     min_level = self.min_buffer_for_quality(quality)
-#                     max_placeholder = max(0, min_level - buffer_level)
-#                     self.placeholder = min(max_placeholder, self.placeholder)
-#                     break
-
-#         return (quality, delay)
-
-#     def report_delay(self, delay):
-#         self.placeholder += delay
-
-#     def report_download(self, metrics, is_replacement):
-#         global manifest
-#         self.last_quality = metrics.quality
-#         level = get_buffer_level()
-
-#         if metrics.abandon_to_quality is None:
-#             if is_replacement:
-#                 self.placeholder += manifest.segment_time
-#             else:
-#                 level_was = level + metrics.time
-#                 max_effective_level = self.max_buffer_for_quality(metrics.quality)
-#                 max_placeholder = max(0, max_effective_level - level_was)
-#                 self.placeholder = min(self.placeholder, max_placeholder)
-
-#                 if level > 0:
-#                     min_effective_level = self.min_buffer_for_quality(metrics.quality)
-#                     min_placeholder = min_effective_level - level_was
-#                     self.placeholder = max(self.placeholder, min_placeholder)
-
-#         elif not is_replacement:
-#             if metrics.abandon_to_quality > 0:
-#                 want_level = self.min_buffer_for_quality(metrics.abandon_to_quality)
-#             else:
-#                 want_level = BolaEnh.minimum_buffer
-#             max_placeholder = max(0, want_level - level)
-#             self.placeholder = min(self.placeholder, max_placeholder)
-
-#     def report_seek(self, where):
-#         self.state = BolaEnh.State.STARTUP
-
-#     def check_abandon(self, progress, buffer_level):
-#         global manifest
-
-#         remain = progress.size - progress.downloaded
-#         if progress.downloaded <= 0 or remain <= 0:
-#             return None
-
-#         bl = max(0, buffer_level + self.placeholder - progress.time_to_first_bit)
-#         tp = progress.downloaded / (progress.time - progress.time_to_first_bit)
-#         sz = remain - progress.time_to_first_bit * tp
-#         if sz <= 0:
-#             return None
-
-#         abandon_to = None
-#         score = (self.Vp * (self.gp + self.utilities[progress.quality]) - bl) / sz
-
-#         for q in range(progress.quality):
-#             other_size = progress.size * manifest.bitrates[q] / manifest.bitrates[progress.quality]
-#             other_score = (self.Vp * (self.gp + self.utilities[q]) - bl) / other_size
-#             if other_size < sz and other_score > score:
-#                 score = other_score
-#                 abandon_to = q
-
-#         return abandon_to
-
-# abr_list['ashbolae'] = BolaEnh
+abr_list['ashbolae'] = AshBolaEnh
 abr_default = 'bolae'
 
 
@@ -1674,7 +1490,7 @@ class DynamicDash(Abr):
     def __init__(self, config):
         global manifest
 
-        self.bola = BolaEnh(config)
+        self.bola = AshBolaEnh(config)
         self.tput = ThroughputRule(config)
 
         buffer_size = config['buffer_size']
