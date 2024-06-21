@@ -54,11 +54,11 @@ def plot_cdfs(cdf_csv_files, labels, output_plot):
 
 def main():
     cdf_csv_files = [
-        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/HDcdf_bola_data/cdf_time_average_bitrate_change.csv', 
-        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/HDcdf_ashbola_data/cdf_time_average_bitrate_change.csv',
-        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/HDcdf_dynamic_data/cdf_time_average_bitrate_change.csv', 
-        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/HDcdf_bolaE_data/cdf_time_average_bitrate_change.csv', 
-        # '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/HDcdf_ashbolaE_data/cdf_time_average_bitrate_change.csv', 
+        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/cdf_bola_data/cdf_time_average_bitrate_change.csv', 
+        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/cdf_ashbola_data/cdf_time_average_bitrate_change.csv',
+        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/cdf_dynamic_data/cdf_time_average_bitrate_change.csv', 
+        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/cdf_bolae_data/cdf_time_average_bitrate_change.csv', 
+        # '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/Dcdf_ashbolaE_data/cdf_time_average_bitrate_change.csv', 
         # '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/SD_cdf_NEWashbolaE_data/cdf_time_average_bitrate_change.csv', 
         
     ]  # List of paths to CDF CSV files
@@ -73,7 +73,7 @@ def main():
         # 'NewAshBola-E'
     ]  # Labels for each plot line
 
-    output_plot = '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/FINAL_HD_avg_bit_osc_plot.png'  # Path to save the plot
+    output_plot = '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/FINAL_SD_avg_bit_osc_plot.png'  # Path to save the plot
 
     plot_cdfs(cdf_csv_files, labels, output_plot)
 

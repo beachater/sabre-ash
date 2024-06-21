@@ -2,7 +2,6 @@ import csv
 import matplotlib.pyplot as plt
 import itertools
 import numpy as np
-
 def plot_cdfs(cdf_csv_files, labels, output_plot):
     if len(cdf_csv_files) != len(labels):
         raise ValueError("The number of CSV files must match the number of labels")
@@ -13,7 +12,7 @@ def plot_cdfs(cdf_csv_files, labels, output_plot):
 
     all_x = []
 
-    for cdf_csv, label, marker in zip(cdf_csv_files, labels,markers):
+    for cdf_csv, label, marker in zip(cdf_csv_files, labels, markers):
         x = []
         y = []
         
@@ -29,23 +28,24 @@ def plot_cdfs(cdf_csv_files, labels, output_plot):
         mean = np.mean(x)
         print(label, ":", mean)
         
+        
 
-        # Plotting the CDF
         mark = 0
         # Plotting the CDF with markers
         plt.plot(x, y, label=f"{label}", color=next(colors), marker=marker[mark], markevery=15)
-        mark +=1    
+        mark +=1
+    
     # Determine the overall min and max x values
     min_x = min(all_x)
     max_x = max(all_x)
 
-    plt.xlabel('average bitrate oscilation (kbps)')
+    plt.xlabel('average bitrate (kbps)')
     # plt.ylabel('CDF')
     # plt.title('Startup Reaction Time')
     plt.legend()
     
     # Set x-ticks to increments of 10 and cover the full range
-    plt.xticks(range(0, int(max_x) + 100, 100))
+    plt.xticks(range(0, int(max_x) + 1000, 1000))
     plt.xlim(min_x, max_x)
     
     plt.grid(True)
@@ -54,15 +54,13 @@ def plot_cdfs(cdf_csv_files, labels, output_plot):
 
 def main():
     cdf_csv_files = [
-        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/HDcdf_bola_data/cdf_time_average_bitrate_change.csv', 
-        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/HDcdf_ashbola_data/cdf_time_average_bitrate_change.csv',
-        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/HDcdf_dynamic_data/cdf_time_average_bitrate_change.csv', 
-        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/HDcdf_bolaE_data/cdf_time_average_bitrate_change.csv', 
-        # '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/HDcdf_ashbolaE_data/cdf_time_average_bitrate_change.csv', 
-        # '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/SD_cdf_NEWashbolaE_data/cdf_time_average_bitrate_change.csv', 
-        
+        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/cdf_bola_data/cdf_time_average_played_bitrate.csv', 
+        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/cdf_ashbola_data/cdf_time_average_played_bitrate.csv',
+        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/cdf_dynamic_data/cdf_time_average_played_bitrate.csv', 
+        '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/cdf_bolae_data/cdf_time_average_played_bitrate.csv', 
+        # '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/cdf_ashbolaE_data/cdf_time_average_played_bitrate.csv', 
+        # '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/cdf_data/HDcdf_ashbolaE_data/cdf_time_average_played_bitrate.csv', 
     ]  # List of paths to CDF CSV files
-
 
     labels = [
         'Bola',
@@ -70,10 +68,9 @@ def main():
         'Dynamic',
         'Bola-E',
         # 'AshBola-E'
-        # 'NewAshBola-E'
     ]  # Labels for each plot line
 
-    output_plot = '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/FINAL_HD_avg_bit_osc_plot.png'  # Path to save the plot
+    output_plot = '/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/plotting/FINAL_SD_average_bitrate_cdf_plot.png'  # Path to save the plot
 
     plot_cdfs(cdf_csv_files, labels, output_plot)
 

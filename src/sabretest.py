@@ -1,26 +1,3 @@
-# Copyright (c) 2018, Kevin Spiteri
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice, this
-#    list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-#    this list of conditions and the following disclaimer in the documentation
-#    and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
-# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 import argparse
 import json
 import math
@@ -510,51 +487,6 @@ class Replacement:
 average_list = {}
 abr_list = {}
 
-class SlidingWindow(ThroughputHistory):
-
-    default_window_size = [3]
-    max_store = 20
-
-    def __init__(self, config):
-        global throughput
-        global latency
-
-        if 'window_size' in config and config['window_size'] != None:
-            self.window_size = config['window_size']
-        else:
-            self.window_size = SlidingWindow.default_window_size
-
-        # TODO: init somewhere else?
-        throughput = None
-        latency = None
-
-        self.last_throughputs = []
-        self.last_latencies = []
-
-    def push(self, time, tput, lat):
-        global throughput
-        global latency
-
-        self.last_throughputs += [tput]
-        self.last_throughputs = self.last_throughputs[-SlidingWindow.max_store:]
-
-        self.last_latencies += [lat]
-        self.last_latencies = self.last_latencies[-SlidingWindow.max_store:]
-
-        tput = None
-        lat = None
-        for ws in self.window_size:
-            sample = self.last_throughputs[-ws:]
-            t = sum(sample) / len(sample)
-            tput = t if tput == None else min(tput, t) # conservative min
-            sample = self.last_latencies[-ws:]
-            l = sum(sample) / len(sample)
-            lat = l if lat == None else max(lat, l) # conservative max
-        throughput = tput
-        latency = lat
-
-average_list['sliding'] = SlidingWindow
-
 class Ewma(ThroughputHistory):
 
     # for throughput:
@@ -681,14 +613,11 @@ class Bola(Abr):
                     # now need to calculate delay
                     b = manifest.bitrates[quality]
                     u = self.utilities[quality]
-                    #bb = manifest.bitrates[quality + 1]
-                    #uu = self.utilities[quality + 1]
-                    #l = self.Vp * (self.gp + (bb * u - b * uu) / (bb - b))
                     l = self.Vp * (self.gp + u) ##########
                     delay = max(0, get_buffer_level() - l)
                     if quality == len(manifest.bitrates) - 1:
                         delay = 0
-                    # delay = 0 ###########
+              
 
         self.last_quality = quality
         return (quality, delay)
@@ -871,220 +800,6 @@ class AshBola(Abr):
         return abandon_to
 
 abr_list['ashbola'] = AshBola
-
-class CombinedAbr(Abr):
-    def __init__(self, config):
-        global verbose
-        global manifest
-
-        utility_offset = -math.log(manifest.bitrates[0])
-        self.utilities = [math.log(b) + utility_offset for b in manifest.bitrates]
-
-        self.gp = config['gp']
-        self.buffer_size = config['buffer_size']
-        self.abr_osc = config['abr_osc']
-        self.abr_basic = config['abr_basic']
-        self.Vp = (self.buffer_size - manifest.segment_time) / (self.utilities[-1] + self.gp)
-
-        self.last_seek_index = 0
-        self.last_quality = 0
-
-        custom_objects = {
-            'mse': tf.keras.losses.MeanSquaredError()
-        }
-
-        self.model = tf.keras.models.load_model('/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/src/ashBOLA3g4g.h5', custom_objects=custom_objects)
-
-        self.bola = Bola(config)
-        self.dynamic = Dynamic(config)
-
-        self.is_bola = False
-
-        if verbose:
-            for q in range(len(manifest.bitrates)):
-                b = manifest.bitrates[q]
-                u = self.utilities[q]
-                l = self.Vp * (self.gp + u)
-                if q == 0:
-                    print('%d %d' % (q, l))
-                else:
-                    qq = q - 1
-                    bb = manifest.bitrates[qq]
-                    uu = self.utilities[qq]
-                    ll = self.Vp * (self.gp + (b * uu - bb * u) / (b - bb))
-                    print('%d %d    <- %d %d' % (q, l, qq, ll))
-
-    def prepare_prediction_data(self, network_trace, segment_index, window_size):
-        data = []
-        for i in range(segment_index - window_size, segment_index):
-            if i >= 0 and i < len(network_trace):
-                period = network_trace[i]
-                period_time = period.time / 1000
-                period_bandwidth = period.bandwidth / 1000
-                data.append([period_time * period_bandwidth, period_time, period_bandwidth])
-
-        if len(data) < window_size:
-            padding = [[0, 0, 0]] * (window_size - len(data))
-            data = padding + data
-
-        assert len(data) == window_size, f"Data length {len(data)} does not match window size {window_size}"
-        return np.array(data).reshape((1, window_size, 3))
-
-    def predict_bandwidth(self, network_trace, segment_index):
-        window_size = 20
-        data = self.prepare_prediction_data(network_trace, segment_index, window_size)
-        predicted_bandwidth = self.model.predict(data)[0][0]
-        return predicted_bandwidth * 1000
-
-    def quality_from_buffer(self, predicted_throughput):
-        level = get_buffer_level()
-        quality = 0
-        score = None
-        for q in range(len(manifest.bitrates)):
-            s = ((self.Vp * (self.utilities[q] + self.gp) - level) / manifest.bitrates[q])
-            if score is None or s > score:
-                quality = q
-                score = s
-        return quality
-
-    def get_quality_delay(self, segment_index):
-        global manifest
-        global network_trace
-
-        predicted_throughput = self.predict_bandwidth(network_trace, segment_index)
-
-        if not self.abr_basic:
-            t = min(segment_index - self.last_seek_index, len(manifest.segments) - segment_index)
-            t = max(t / 2, 3)
-            t = t * manifest.segment_time
-            buffer_size = min(self.buffer_size, t)
-            self.Vp = (buffer_size - manifest.segment_time) / (self.utilities[-1] + self.gp)
-
-        quality = self.quality_from_buffer(predicted_throughput)
-        delay = 0
-
-        if quality > self.last_quality:
-            quality_t = self.quality_from_throughput(predicted_throughput)
-            if quality <= quality_t:
-                delay = 0
-            elif self.last_quality > quality_t:
-                quality = self.last_quality
-                delay = 0
-            else:
-                if not self.abr_osc:
-                    quality = quality_t + 1
-                    delay = 0
-                else:
-                    quality = quality_t
-                    b = manifest.bitrates[quality]
-                    u = self.utilities[quality]
-                    l = self.Vp * (self.gp + u)
-                    delay = max(0, get_buffer_level() - l)
-                    if quality == len(manifest.bitrates) - 1:
-                        delay = 0
-
-        self.last_quality = quality
-        return (quality, delay)
-
-    def report_seek(self, where):
-        global manifest
-        self.last_seek_index = math.floor(where / manifest.segment_time)
-
-    def check_abandon(self, progress, buffer_level):
-        global manifest
-
-        if self.abr_basic:
-            return None
-
-        remain = progress.size - progress.downloaded
-        if progress.downloaded <= 0 or remain <= 0:
-            return None
-
-        abandon_to = None
-        score = (self.Vp * (self.gp + self.utilities[progress.quality]) - buffer_level) / remain
-        if score < 0:
-            return None
-
-        for q in range(progress.quality):
-            other_size = progress.size * manifest.bitrates[q] / manifest.bitrates[progress.quality]
-            other_score = (self.Vp * (self.gp + self.utilities[q]) - buffer_level) / other_size
-            if other_size < remain and other_score > score:
-                score = other_score
-                abandon_to = q
-
-        if abandon_to is not None:
-            self.last_quality = abandon_to
-
-        return abandon_to
-
-    def get_first_quality(self):
-        if self.is_bola:
-            return self.bola.get_first_quality()
-        else:
-            return self.dynamic.get_first_quality()
-
-    def report_delay(self, delay):
-        self.bola.report_delay(delay)
-        self.dynamic.report_delay(delay)
-
-    def report_download(self, metrics, is_replacement):
-        self.bola.report_download(metrics, is_replacement)
-        self.dynamic.report_download(metrics, is_replacement)
-        if is_replacement:
-            self.is_bola = False
-
-    def predict_bandwidth_combined(self, network_trace, segment_index):
-        predicted_bola_bandwidth = self.bola.predict_bandwidth(network_trace, segment_index)
-        predicted_dynamic_bandwidth = self.dynamic.predict_bandwidth(network_trace, segment_index)
-
-        # Combine predictions based on some logic (e.g., weighted average, decision rules)
-        # Here's a simple example of using a weighted average
-        weight_bola = 0.5
-        weight_dynamic = 1 - weight_bola
-        predicted_bandwidth_combined = (weight_bola * predicted_bola_bandwidth +
-                                        weight_dynamic * predicted_dynamic_bandwidth)
-
-        return predicted_bandwidth_combined
-
-    def get_quality_delay_combined(self, segment_index):
-        global manifest
-        global network_trace
-
-        predicted_throughput_combined = self.predict_bandwidth_combined(network_trace, segment_index)
-
-        if not self.abr_basic:
-            t = min(segment_index - self.last_seek_index, len(manifest.segments) - segment_index)
-            t = max(t / 2, 3)
-            t = t * manifest.segment_time
-            buffer_size = min(self.buffer_size, t)
-            self.Vp = (buffer_size - manifest.segment_time) / (self.utilities[-1] + self.gp)
-
-        quality_bola, delay_bola = self.bola.get_quality_delay(segment_index)
-        quality_dynamic, delay_dynamic = self.dynamic.get_quality_delay(segment_index)
-
-        # Combine quality and delay based on some logic (e.g., choose better quality, choose based on buffer level)
-        if self.is_bola:
-            quality_combined = quality_bola
-            delay_combined = delay_bola
-        else:
-            quality_combined = quality_dynamic
-            delay_combined = delay_dynamic
-
-        # Example logic to switch between Bola and Dynamic
-        level = get_buffer_level()
-        if self.is_bola:
-            if level < Dynamic.low_buffer_threshold and quality_bola < quality_dynamic:
-                self.is_bola = False
-        else:
-            if level > Dynamic.low_buffer_threshold and quality_bola >= quality_dynamic:
-                self.is_bola = True
-
-        return (quality_combined, delay_combined)
-
-
-abr_list['combined'] = CombinedAbr
-
-import collections
 
 class AshBolaEnh(Abr):
 
@@ -1368,11 +1083,6 @@ class AshBolaEnh(Abr):
             other_size = progress.size * manifest.bitrates[q] / manifest.bitrates[progress.quality]
             other_score = (self.Vp * (self.gp + self.utilities[q]) - bl) / other_size
             if other_size < sz and other_score > score:
-                # check size:
-                # if remaining bits in this download are less than new download, why switch?
-                # IMPORTANT: this check is NOT subsumed in score check:
-                # if sz < other_size and bl is large, original score suffers larger penalty
-                #print('abandon bl=%d=%d+%d-%d %d->%d score:%d->%s' % (progress.quality, bl, buffer_level, self.placeholder, progress.time_to_first_bit, q, score, other_score))
                 score = other_score
                 abandon_to = q
 
@@ -1484,76 +1194,6 @@ class Dynamic(Abr):
             return self.tput.check_abandon(progress, buffer_level)
 
 abr_list['dynamic'] = Dynamic
-
-class DynamicDash(Abr):
-
-    def __init__(self, config):
-        global manifest
-
-        self.bola = AshBolaEnh(config)
-        self.tput = ThroughputRule(config)
-
-        buffer_size = config['buffer_size']
-        self.low_threshold = (buffer_size - manifest.segment_time) / 2
-        self.high_threshold = (buffer_size - manifest.segment_time) - 100
-        self.low_threshold = 5000
-        self.high_threshold = 10000
-        ######################## TODO
-        self.is_bola = False
-
-    def get_quality_delay(self, segment_index):
-        level = get_buffer_level()
-        if self.is_bola and level < self.low_threshold:
-            self.is_bola = False
-        elif not self.is_bola and level > self.high_threshold:
-            self.is_bola = True
-
-        if self.is_bola:
-            return self.bola.get_quality_delay(segment_index)
-        else:
-            return self.tput.get_quality_delay(segment_index)
-
-    def get_first_quality(self):
-        if self.is_bola:
-            return self.bola.get_first_quality()
-        else:
-            return self.tput.get_first_quality()
-
-    def report_delay(self, delay):
-        self.bola.report_delay(delay)
-        self.tput.report_delay(delay)
-
-    def report_download(self, metrics, is_replacment):
-        self.bola.report_download(metrics, is_replacment)
-        self.tput.report_download(metrics, is_replacment)
-
-    def check_abandon(self, progress, buffer_level):
-        if self.is_bola:
-            return self.bola.check_abandon(progress, buffer_level)
-        else:
-            return self.tput.check_abandon(progress, buffer_level)
-
-abr_list['dynamicdash'] = DynamicDash
-
-class Bba(Abr):
-
-    def __init__(self, config):
-        pass
-
-    def get_quality_delay(self, segment_index):
-        raise NotImplementedError
-
-    def report_delay(self, delay):
-        pass
-
-    def report_download(self, metrics, is_replacment):
-        pass
-
-    def report_seek(self, where):
-        pass
-
-
-abr_list['bba'] = Bba
 
 class NoReplace(Replacement):
         pass
@@ -1823,7 +1463,6 @@ if __name__ == '__main__':
                 args.seek = None
                 rampup_origin = total_play_time
                 rampup_time = None
-        # TODO:  END TODO:  reimplement seeking - currently only proof-of-concept hack
 
         # do we have space for a new segment on the buffer?
         full_delay = get_buffer_level() + manifest.segment_time - buffer_size
@@ -1860,17 +1499,10 @@ if __name__ == '__main__':
             if verbose:
                 print('abr delay %d bl=%d' % (delay, get_buffer_level()))
 
-        #print('size %d, current_segment %d, quality %d, buffer_level %d' %
-        #      (size, current_segment, quality, get_buffer_level()))
+
 
         download_metric = network.download(size, current_segment, quality,
                                            get_buffer_level(), check_abandon)
-
-        #print('index %d, quality %d, downloaded %d/%d, time %d=%d+.' %
-        #      (download_metric.index, download_metric.quality,
-        #       download_metric.downloaded, download_metric.size,
-        #       download_metric.time, download_metric.time_to_first_bit))
-
         if verbose:
             print('[%d-%d]  %d: q=%d s=%d/%d t=%d=%d+%d ' %
                   (round(total_play_time), round(total_play_time + download_metric.time),
@@ -1923,14 +1555,6 @@ if __name__ == '__main__':
             else:
                 pass
             # else: do nothing because segment abandonment does not suggest new download
-
-        #if rampup_time == None and download_metric.abandon_to_quality == None:
-        #    if rampup_threshold == None:
-        #        if download_metric.quality >= sustainable_quality:
-        #            rampup_time = download_metric.index * manifest.segment_time
-        #    else:
-        #        if download_metric.quality >= rampup_threshold:
-        #            rampup_time = download_metric.index * manifest.segment_time
 
         if verbose:
             print('->%d' % get_buffer_level())
