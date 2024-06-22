@@ -727,11 +727,9 @@ class AshBola(Abr):
         self.last_seek_index = 0
         self.last_quality = 0
 
-# Handle custom objects
         custom_objects = {
             'mse': tf.keras.losses.MeanSquaredError()
         }
-
         self.model = tf.keras.models.load_model('/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/src/ashBOLA3g4g.h5', custom_objects=custom_objects)
 
         if verbose:
@@ -758,7 +756,6 @@ class AshBola(Abr):
                 data.append([period_time * period_bandwidth, period_time, period_bandwidth])
                 print("windowsize", window_size)
 
-        # Ensure data has exactly `window_size` elements by padding with zeros if necessary
         if len(data) < window_size:
             padding = [[0, 0, 0]] * (window_size - len(data))
             data = padding + data
