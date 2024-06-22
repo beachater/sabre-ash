@@ -18,6 +18,11 @@ struct ManifestInfo {
     vector<vector<int>> segments;
 };
 
+struct NetworkPeriod {
+    double time;
+    double bandwidth;
+};
+
 enum class State {
     STARTUP,
     STEADY
@@ -97,8 +102,24 @@ double get_predicted_bandwidth(const json& inputData, bool debug = false) {
     throw std::invalid_argument("Failed to parse any numeric output from Python script.");
 }
 
-
-
+vector<double> prepare_prediction_data(const vector<NetworkPeriod>& network_trace, int segment_index, int window_size) {
+    vector<double> data;
+    for (int i = segment_index - window_size; i < segment_index; ++i) {
+        if (i >= 0 && i < network_trace.size()) {
+            double period_time = network_trace[i].time / 1000.0;
+            double period_bandwidth = network_trace[i].bandwidth / 1000.0;
+            data.push_back(period_time * period_bandwidth);
+            data.push_back(period_time);
+            data.push_back(period_bandwidth);
+        } else {
+            // If no data is available, use zeros as placeholder
+            data.push_back(0.0);
+            data.push_back(0.0);
+            data.push_back(0.0);
+        }
+    }
+    return data;
+}
 
 int main() {
     ifstream manifest_file("/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/example/mmsys18/bbb.json"), network_file("/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/example/mmsys18/sd_fs/trace0001.json");
@@ -113,15 +134,36 @@ int main() {
         manifest_json.at("segment_sizes_bits").get<vector<vector<int>>>()
     };
 
+    vector<NetworkPeriod> network_trace;
+    for (const auto& period : network_json) {
+        network_trace.push_back({
+            period.at("duration_ms").get<double>(),
+            period.at("bandwidth_kbps").get<double>()
+        });
+    }
+
     AshBolaEnh abr(manifest, 25000, 5); // Example buffer size and gamma p
 
-    json inputData = {{"data", vector<double>(30, 1.0)}}; // Simulated input for bandwidth prediction
-    double predicted_bandwidth = get_predicted_bandwidth(inputData);
+    int total_segments = manifest.segments.size();
+    double total_bitrate_played = 0;
+    int segment_count = 0;
+    int window_size = 10;  // Example window size for the model input
 
-    cout << "Predicted bandwidth: " << predicted_bandwidth << " Kbps" << endl;
+    for (int i = 0; i < total_segments; ++i) {
+        auto input_data = prepare_prediction_data(network_trace, i, window_size);
+        json inputData = {{"data", input_data}}; // Input data for bandwidth prediction
+        double predicted_bandwidth = get_predicted_bandwidth(inputData);
+        
+        int selected_quality = abr.select_quality(predicted_bandwidth);
+        total_bitrate_played += manifest.bitrates[selected_quality];
+        segment_count++;
 
-    int selected_quality = abr.select_quality(predicted_bandwidth);
-    cout << "Selected quality index: " << selected_quality << endl;
+        cout << "Segment " << i << ": Quality Index = " << selected_quality
+             << ", Bitrate = " << manifest.bitrates[selected_quality] << " Kbps" << endl;
+    }
+
+    double average_bitrate = total_bitrate_played / segment_count;
+    cout << "Average bitrate played: " << average_bitrate << " Kbps" << endl;
 
     return 0;
 }
