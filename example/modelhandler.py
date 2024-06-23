@@ -22,7 +22,7 @@ if __name__ == '__main__':
     model = load_model(model_path)
     data = np.array(input_data['data']).reshape((1, 10, 3))
 
-    output = predict(model, data)
+    output = predict(model, data) * 1000
     
     if debug:
         print("Debug information: Model output", output)

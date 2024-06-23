@@ -9,6 +9,7 @@
 #include <memory>
 #include <limits>
 #include <iomanip>
+#include <deque>
 
 using json = nlohmann::json;
 using namespace std;
@@ -41,6 +42,7 @@ public:
     vector<double> bandwidth_history;
     const double initial_bandwidth_estimate = 1000.0;
     const int max_history_length = 10;
+    double total_bitrate_played = 0.0;
 
     AshBolaEnh(const ManifestInfo& m, double buffer_size, double gamma_p) : manifest(m), Vp(0), gp(gamma_p) {
         double utility_offset = 1 - log(manifest.bitrates[0]);
@@ -52,10 +54,9 @@ public:
         Vp = AshBolaEnh::minimum_buffer / gp;
     }
 
-    int select_quality(double predicted_bandwidth) {
+    int select_quality(double predicted_bandwidth, double buffer_level) {
         int quality = 0;
         double max_score = -numeric_limits<double>::max();
-        double buffer_level = placeholder;  // This should be calculated from actual buffer status
 
         for (size_t i = 0; i < manifest.bitrates.size(); ++i) {
             double score = (Vp * (utilities[i] + gp) - buffer_level) / manifest.bitrates[i];
@@ -65,7 +66,12 @@ public:
             }
         }
         last_quality = quality;
+        total_bitrate_played += manifest.bitrates[quality];
         return quality;
+    }
+
+    double getTotalBitratePlayed(){
+        return total_bitrate_played;
     }
 
     double smooth_bandwidth() {
@@ -142,7 +148,7 @@ private:
     static const double low_buffer_safety_factor;
     static const double low_buffer_safety_factor_init;
 
-    double get_predicted_bandwidth(const json& inputData, bool debug = false) {
+    double get_predicted_bandwidth(const json& inputData, bool debug = true) {
         string debug_flag = debug ? "debug" : "";
         string command = "echo '" + inputData.dump() + "' | python3 modelhandler.py " + debug_flag;
         cout << "Executing command for bandwidth prediction: " << command << endl;
@@ -187,6 +193,10 @@ const double AshBolaEnh::minimum_buffer_per_level = 2000;
 const double AshBolaEnh::low_buffer_safety_factor = 0.5;
 const double AshBolaEnh::low_buffer_safety_factor_init = 0.9;
 
+double get_buffer_level(const vector<int>& buffer_contents, int buffer_fcc, int segment_time) {
+    return segment_time * buffer_contents.size() - buffer_fcc;
+}
+
 int main() {
     ifstream manifest_file("/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/example/mmsys18/bbb.json"), network_file("/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/example/mmsys18/hd_fs/trace0007.json");
     json manifest_json, network_json;
@@ -208,52 +218,40 @@ int main() {
         });
     }
 
-    AshBolaEnh abr(manifest, 25000, 5); // Example buffer size and gamma p
+    AshBolaEnh abr(manifest, 25000, 5);
 
-    int total_segments = manifest.segments.size();
-    double total_bitrate_played = 0;
-    double played_utility = 0;
-    int segment_count = 0;
-    int window_size = 10;  // Example window size for the model input
     double total_play_time = 0;
     double rebuffer_time = 0;
     int rebuffer_event_count = 0;
-    double total_bitrate_change = 0;
-    double total_log_bitrate_change = 0;
-    int overestimate_count = 0;
-    double overestimate_average = 0;
-    int goodestimate_count = 0;
-    double goodestimate_average = 0;
-    double estimate_average = 0;
-    double rampup_time = 0;
-    double total_reaction_time = 0;
-    double startup_time = 0;
+    int total_segments = manifest.segments.size();
+    int window_size = 10;
+    vector<int> buffer_contents;
+    int buffer_fcc = 0;
 
     for (int i = 0; i < total_segments; ++i) {
+        double buffer_level = get_buffer_level(buffer_contents, buffer_fcc, manifest.segment_time);
         double predicted_bandwidth = abr.predict_bandwidth(network_trace, i, window_size);
+        int selected_quality = abr.select_quality(predicted_bandwidth, buffer_level);
 
-        int selected_quality = abr.select_quality(predicted_bandwidth);
-        total_bitrate_played += manifest.bitrates[selected_quality];
-        played_utility += abr.utilities[selected_quality];
-        segment_count++;
+        total_play_time += manifest.segment_time;
+        buffer_contents.push_back(selected_quality); // Update buffer contents
 
         cout << "Segment " << i << ": Quality Index = " << selected_quality
-             << ", Bitrate = " << manifest.bitrates[selected_quality] << " Kbps" << endl;
-
-        total_play_time += manifest.segment_time; // Assuming constant segment time for simplicity
+             << ", Bitrate = " << manifest.bitrates[selected_quality] << " Kbps"
+             << ", Buffer Level = " << buffer_level << endl;
 
         // Additional logic for rebuffering, bitrate changes, and other metrics can be added here
     }
 
     double to_time_average = 1 / (total_play_time / manifest.segment_time);
-    double average_bitrate = total_bitrate_played / segment_count;
+    double average_bitrate = abr.getTotalBitratePlayed() / total_segments;
     cout << fixed << setprecision(2);
     cout << "Average bitrate played: " << average_bitrate << " Kbps" << endl;
     cout << "Buffer size: " << 25000 << endl;
-    cout << "Total played utility: " << played_utility << endl;
-    cout << "Time average played utility: " << (played_utility * to_time_average) << endl;
-    cout << "Total played bitrate: " << total_bitrate_played << endl;
-    cout << "Time average played bitrate: " << (total_bitrate_played * to_time_average) << endl;
+    cout << "Total played utility: " << "N/A" << endl; // Calculate this if necessary
+    cout << "Time average played utility: " << "N/A" << endl; // Calculate this if necessary
+    cout << "Total played bitrate: " << abr.getTotalBitratePlayed() << endl;
+    cout << "Time average played bitrate: " << (abr.getTotalBitratePlayed() * to_time_average) << endl;
     cout << "Total play time: " << (total_play_time / 1000) << " seconds" << endl;
     cout << "Total play time chunks: " << (total_play_time / manifest.segment_time) << endl;
     cout << "Total rebuffer: " << (rebuffer_time / 1000) << " seconds" << endl;
@@ -261,32 +259,11 @@ int main() {
     cout << "Time average rebuffer: " << (rebuffer_time / 1000 * to_time_average) << endl;
     cout << "Total rebuffer events: " << rebuffer_event_count << endl;
     cout << "Time average rebuffer events: " << (rebuffer_event_count * to_time_average) << endl;
-    cout << "Total bitrate change: " << total_bitrate_change << endl;
-    cout << "Time average bitrate change: " << (total_bitrate_change * to_time_average) << endl;
-    cout << "Total log bitrate change: " << total_log_bitrate_change << endl;
-    cout << "Time average log bitrate change: " << (total_log_bitrate_change * to_time_average) << endl;
-    cout << "Time average score: " << (to_time_average * (played_utility - 5 * rebuffer_time / manifest.segment_time)) << endl;
-    if (overestimate_count == 0) {
-        cout << "Over estimate count: 0" << endl;
-        cout << "Over estimate: 0" << endl;
-    } else {
-        cout << "Over estimate count: " << overestimate_count << endl;
-        cout << "Over estimate: " << overestimate_average << endl;
-    }
-    if (goodestimate_count == 0) {
-        cout << "Leq estimate count: 0" << endl;
-        cout << "Leq estimate: 0" << endl;
-    } else {
-        cout << "Leq estimate count: " << goodestimate_count << endl;
-        cout << "Leq estimate: " << goodestimate_average << endl;
-    }
-    cout << "Estimate: " << estimate_average << endl;
-    if (rampup_time == 0) {
-        cout << "Rampup time: " << (total_segments * manifest.segment_time / 1000) << " seconds" << endl;
-    } else {
-        cout << "Rampup time: " << (rampup_time / 1000) << " seconds" << endl;
-    }
-    cout << "Total reaction time: " << (total_reaction_time / 1000) << " seconds" << endl;
+    cout << "Total bitrate change: " << "N/A" << endl; // Calculate this if necessary
+    cout << "Time average bitrate change: " << "N/A" << endl; // Calculate this if necessary
+    cout << "Total log bitrate change: " << "N/A" << endl; // Calculate this if necessary
+    cout << "Time average log bitrate change: " << "N/A" << endl; // Calculate this if necessary
+    cout << "Time average score: " << "N/A" << endl; // Calculate this if necessary
 
     return 0;
 }

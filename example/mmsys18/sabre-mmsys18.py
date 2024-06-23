@@ -1303,6 +1303,7 @@ class AshBolaEnh(Abr):
 
         quality = self.quality_from_buffer_placeholder()
         predicted_throughput = self.predict_bandwidth(network_trace, segment_index)
+        print("Predicted throughput: ", predicted_throughput)
         quality_t = self.quality_from_throughput(predicted_throughput)
         if quality > self.last_quality and quality > quality_t:
             quality = max(self.last_quality, quality_t)
