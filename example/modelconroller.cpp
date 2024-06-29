@@ -198,7 +198,7 @@ double get_buffer_level(const vector<int>& buffer_contents, int buffer_fcc, int 
 }
 
 int main() {
-    ifstream manifest_file("/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/example/mmsys18/bbb.json"), network_file("/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/example/mmsys18/hd_fs/trace0007.json");
+    ifstream manifest_file("/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/example/mmsys18/bbb.json"), network_file("/home/beachater/Thesis/simulation/sabre-ash/sabre-ash/example/mmsys18/sd_fs/trace0000.json");
     json manifest_json, network_json;
 
     manifest_file >> manifest_json;
@@ -247,23 +247,5 @@ int main() {
     double average_bitrate = abr.getTotalBitratePlayed() / total_segments;
     cout << fixed << setprecision(2);
     cout << "Average bitrate played: " << average_bitrate << " Kbps" << endl;
-    cout << "Buffer size: " << 25000 << endl;
-    cout << "Total played utility: " << "N/A" << endl; // Calculate this if necessary
-    cout << "Time average played utility: " << "N/A" << endl; // Calculate this if necessary
-    cout << "Total played bitrate: " << abr.getTotalBitratePlayed() << endl;
-    cout << "Time average played bitrate: " << (abr.getTotalBitratePlayed() * to_time_average) << endl;
-    cout << "Total play time: " << (total_play_time / 1000) << " seconds" << endl;
-    cout << "Total play time chunks: " << (total_play_time / manifest.segment_time) << endl;
-    cout << "Total rebuffer: " << (rebuffer_time / 1000) << " seconds" << endl;
-    cout << "Rebuffer ratio: " << (rebuffer_time / total_play_time) << endl;
-    cout << "Time average rebuffer: " << (rebuffer_time / 1000 * to_time_average) << endl;
-    cout << "Total rebuffer events: " << rebuffer_event_count << endl;
-    cout << "Time average rebuffer events: " << (rebuffer_event_count * to_time_average) << endl;
-    cout << "Total bitrate change: " << "N/A" << endl; // Calculate this if necessary
-    cout << "Time average bitrate change: " << "N/A" << endl; // Calculate this if necessary
-    cout << "Total log bitrate change: " << "N/A" << endl; // Calculate this if necessary
-    cout << "Time average log bitrate change: " << "N/A" << endl; // Calculate this if necessary
-    cout << "Time average score: " << "N/A" << endl; // Calculate this if necessary
-
     return 0;
 }
